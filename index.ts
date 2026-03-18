@@ -1,3 +1,4 @@
+import 'dotenv/config'
 import { createAgent } from "langchain";
 import { ChatDeepSeek } from "@langchain/deepseek";
 import { tool } from "@langchain/core/tools";
@@ -7,12 +8,12 @@ import cors from 'cors'
 
 const key = process.env.DEEPSEEK_API_KEY;
 const bocha = process.env.BOCHA_API_KEY;
-const visionKey = "你的视觉模型API_KEY";  // 替换成你的 API Key（千问/GLM/GPT-4o 等支持视觉的模型）
+const visionKey = process.env.VISION_API_KEY;
 
 const app = express()
 app.use(cors())
-app.use(express.json())
-app.use(express.urlencoded({ extended: true }))
+app.use(express.json({ limit: '50mb' }))
+app.use(express.urlencoded({ extended: true, limit: '50mb' }))
 
 const bochaAPI = async (query: string) => {
     const response = await fetch('https://api.bochaai.com/v1/web-search', {
@@ -28,7 +29,6 @@ const bochaAPI = async (query: string) => {
     return list.map((item: any) => item.summary).join('\n')
 }
 
-// 调用视觉模型 API 识别图片（OpenAI 兼容格式，千问/GLM/GPT-4o 等通用）
 const visionAPI = async (imageUrl: string, question: string) => {
     const response = await fetch('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', {
         method: 'POST',
@@ -50,13 +50,17 @@ const visionAPI = async (imageUrl: string, question: string) => {
         })
     })
     const data = await response.json()
-    return data.choices[0].message.content
+    if (data.error) {
+        console.log('[视觉API 错误]', data.error)
+        return `图片识别失败: ${data.error.message || JSON.stringify(data.error)}`
+    }
+    return data.choices?.[0]?.message?.content ?? '图片识别未返回结果'
 }
 
 const searchTool = tool(
     async (input) => {
         const result = await bochaAPI(input.query)
-        console.log('[Tool 被调用] 搜索:', input.query)
+        console.log('[Tool 搜索被调用] 搜索:', input.query)
         return result
     },
     {
@@ -70,7 +74,7 @@ const searchTool = tool(
 
 const imageRecognitionTool = tool(
     async (input) => {
-        console.log('[Tool 被调用] 识图:', input.imageUrl)
+        console.log('[Tool 识图被调用] 识图:', input.imageUrl)
         const result = await visionAPI(input.imageUrl, input.question)
         return result
     },
@@ -99,11 +103,20 @@ const agent = createAgent({
 });
 
 app.post('/', async (req, res) => {
-    const msg = req.body.msg as string
+    const { msg, image } = req.body as { msg: string; image?: string }
 
     try {
+        let content = msg
+
+        if (image) {
+            console.log('[识图] 检测到图片，调用视觉 API...')
+            const imageDescription = await visionAPI(image, msg || '请描述这张图片的内容')
+            console.log('[识图] 结果:', imageDescription)
+            content = `用户的问题: ${msg || '请描述这张图片'}\n\n图片识别结果: ${imageDescription}`
+        }
+
         const result = await agent.invoke({
-            messages: [{ role: "user", content: msg }],
+            messages: [{ role: "user", content }],
         });
         const lastMessage = result.messages.at(-1)
         res.json({ reply: lastMessage?.content ?? '' })
