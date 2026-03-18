@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document</title>
+  </head>
+  <body>
+    <input type="text" id="msg" />
+    <button id="send">发送</button>
+
+    <p id="reply">回复：<span id="reply-content"></span></p>
+    <script></script>
+    <script>
+      const replyContent = document.getElementById("reply-content");
+      const send = document.getElementById("send");
+      const msg = document.getElementById("msg");
+      let eventSource = null;
+      send.addEventListener("click", async () => {
+        const response = await fetch("http://localhost:3000", {
+          method: "POST",
+          body: JSON.stringify({ msg: msg.value }), //一定要序列化
+          headers: {
+            "Content-Type": "application/json", //一定要设置成json 默认是text/plain
+          },
+        });
+        const reader = response.body.getReader(); //读取流
+        const decoder = new TextDecoder();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const text = decoder.decode(value, { stream: true });
+          console.log(text);
+          replyContent.textContent += text;
+        }
+      });
+    </script>
+  </body>
+</html>

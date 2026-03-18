@@ -1,0 +1,12 @@
+{
+  "type": "module",
+  "dependencies": {
+    "@langchain/core": "^1.1.19",
+    "@langchain/deepseek": "^1.0.9",
+    "@types/express": "^5.0.6",
+    "cors": "^2.8.6",
+    "epxress": "^0.0.1-security",
+    "express": "^5.2.1",
+    "langchain": "^1.2.18"
+  }
+}
