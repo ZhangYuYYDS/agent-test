@@ -5,8 +5,9 @@ import { z } from "zod";
 import express from 'express'
 import cors from 'cors'
 
-const key = "sk-76fc3eb589a645f2bb97b9003931f6e3";
-const bocha = "sk-4faff1f9f024488e93442dd46b7c1517";
+const key = process.env.DEEPSEEK_API_KEY;
+const bocha = process.env.BOCHA_API_KEY;
+const visionKey = "你的视觉模型API_KEY";  // 替换成你的 API Key（千问/GLM/GPT-4o 等支持视觉的模型）
 
 const app = express()
 app.use(cors())
@@ -27,7 +28,31 @@ const bochaAPI = async (query: string) => {
     return list.map((item: any) => item.summary).join('\n')
 }
 
-// 把搜索能力封装成 Tool，Agent 自主决定是否调用
+// 调用视觉模型 API 识别图片（OpenAI 兼容格式，千问/GLM/GPT-4o 等通用）
+const visionAPI = async (imageUrl: string, question: string) => {
+    const response = await fetch('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${visionKey}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            model: "qwen-vl-plus",
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "image_url", image_url: { url: imageUrl } },
+                        { type: "text", text: question }
+                    ]
+                }
+            ]
+        })
+    })
+    const data = await response.json()
+    return data.choices[0].message.content
+}
+
 const searchTool = tool(
     async (input) => {
         const result = await bochaAPI(input.query)
@@ -43,6 +68,22 @@ const searchTool = tool(
     }
 )
 
+const imageRecognitionTool = tool(
+    async (input) => {
+        console.log('[Tool 被调用] 识图:', input.imageUrl)
+        const result = await visionAPI(input.imageUrl, input.question)
+        return result
+    },
+    {
+        name: "image_recognition",
+        description: "识别和分析图片内容。当用户提供了图片URL并要求查看、识别、描述或分析图片时，使用此工具。",
+        schema: z.object({
+            imageUrl: z.string().describe("图片的URL地址"),
+            question: z.string().describe("用户关于这张图片的问题，例如：图片里有什么、这是什么东西"),
+        }),
+    }
+)
+
 const model = new ChatDeepSeek({
     model: "deepseek-chat",
     apiKey: key,
@@ -53,8 +94,8 @@ const model = new ChatDeepSeek({
 // Agent 只创建一次，tools 已绑定，每次请求复用
 const agent = createAgent({
     model,
-    tools: [searchTool],
-    systemPrompt: "今天有什么科技新闻吗？",
+    tools: [searchTool, imageRecognitionTool],
+    systemPrompt: "你是一个智能助手，可以搜索互联网信息，也可以识别分析图片，请用中文回答用户的问题。",
 });
 
 app.post('/', async (req, res) => {
